@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雷霆战机</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .game-box {
+            position: relative;
+
+            width: 400px;
+            height: 700px;
+            background-image: url('img/bg.png');
+            background-repeat: repeat-y;
+            background-position: center 0;
+            background-size: 400px 1616px;
+
+            animation-name: bg;
+            animation-duration: 7s;
+            animation-timing-function: linear;
+            animation-iteration-count: infinite;
+
+            overflow: hidden;
+        }
+
+        @keyframes bg {
+            0% {
+                background-position: center -1616px;
+            }
+
+            100% {
+                background-position: center 0;
+            }
+        }
+
+        .paused {
+            animation-play-state: paused;
+        }
+
+        #plane {
+            position: absolute;
+            bottom: 20px;
+            left: 160px;
+            display: block;
+            width: 80px;
+            height: 50px;
+            z-index: 3;
+        }
+
+        .rocket {
+            position: absolute;
+            width: 20px;
+            height: 30px;
+            object-fit: cover;
+            z-index: 2;
+        }
+
+        .ufo {
+            position: absolute;
+            display: block;
+            width: 50px;
+            height: 50px;
+            z-index: 1;
+        }
+
+        .ufo.boom {
+            animation-name: boom;
+            animation-duration: 0.5s;
+            animation-timing-function: ease-out;
+            animation-fill-mode: both;
+        }
+
+        @keyframes boom {
+            0% {
+                transform: scale(0.8);
+                opacity: 1;
+            }
+
+            100% {
+                transform: scale(1.5);
+                opacity: 0;
+            }
+        }
+
+        .board {
+            position: relative;
+            display: inline-block;
+            padding: 10px;
+            line-height: 1.5;
+            color: #fff;
+            background-color: rgba(255, 255, 255, 0.5);
+            z-index: 5;
+        }
+
+        .modal {
+            position: relative;
+            width: 250px;
+            margin: 200px auto 0;
+            background-color: #0c1824;
+            padding: 15px;
+            z-index: 5;
+            box-shadow: 0 0 5px #ddd;
+            border-radius: 10px;
+        }
+
+        .modal img {
+            display: block;
+            width: 100%;
+            height: 100px;
+            object-fit: contain;
+        }
+
+        .modal .btn {
+            width: 150px;
+            height: 50px;
+            background-image: url('img/btn.png');
+            background-size: 100% 100%;
+            text-align: center;
+            line-height: 50px;
+            color: #fff;
+            font-weight: bolder;
+            font-size: 20px;
+            cursor: pointer;
+            user-select: none;
+            margin: 20px auto 0;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="game-box paused">
+        <div class="board">
+            分数：<span class="score">0</span> <br>
+            血量：<span class="health">10</span>
+        </div>
+
+        <div class="modal start">
+            <img src="img/logo.png">
+            <div class="btn">开始游戏</div>
+        </div>
+        <div class="modal end hidden">
+            <img src="img/gameover.png">
+            <div class="btn">再来一次</div>
+        </div>
+
+        <img src="img/plane.png" id="plane">
+    </div>
+
+    <audio src="audio/bgm.ogg" autoplay loop></audio>
+    <audio src="audio/shoted.mp3" id="shoted"></audio>
+    <audio src="audio/bigboom.mp3" id="bigboom"></audio>
+</body>
+<script>
+    var gameBox = document.querySelector('.game-box');
+    var plane = document.querySelector('#plane');
+    var scoreBox = document.querySelector('.score');
+    var healthBox = document.querySelector('.health');
+    var btns = document.querySelectorAll('.btn');
+    var endModal = document.querySelector('.end');
+    var shotedAudio = document.querySelector('#shoted');
+    var bigboomAudio = document.querySelector('#bigboom');
+
+    var score = 0, health = 10;
+
+    // 基本的尺寸和位置的数据
+    // 游戏区域尺寸：限制飞机飞行的区域
+    var gameBoxW = gameBox.clientWidth, gameBoxH = gameBox.clientHeight;
+    // console.log('游戏区尺寸', gameBoxW, gameBoxH);
+
+    // 飞机的尺寸
+    var planeW = plane.offsetWidth, planeH = plane.offsetHeight;
+    // console.log('飞机尺寸', planeW, planeH);
+
+    // 火箭的尺寸
+    var rocketW = 20, rocketH = 30;
+    // UFO 的尺寸
+    var ufoW = 50, ufoH = 50;
+
+    // 创建用于碰撞检测的函数
+    function isImpact(rocket, ufo) {
+        var result;
+
+        // 对于已经击中的 ufo（已经转换为烟花），就不需要做碰撞检测---效果等同于撞上了也认为没撞上
+        if (ufo.shoted) {
+            return false;
+        }
+
+        // 收集碰撞检测元素的四个边界位置
+        var rocketBorder = {
+            left: rocket.offsetLeft,
+            top: rocket.offsetTop,
+            right: rocket.offsetLeft + rocket.offsetWidth,
+            bottom: rocket.offsetTop + rocket.offsetHeight
+        }
+
+        var ufoBorder = {
+            left: ufo.offsetLeft,
+            top: ufo.offsetTop,
+            right: ufo.offsetLeft + ufo.offsetWidth,
+            bottom: ufo.offsetTop + ufo.offsetHeight
+        }
+
+        // 四个边界检测（检测标准是怎样是装不上的）
+        if (rocketBorder.left > ufoBorder.right || rocketBorder.right < ufoBorder.left || rocketBorder.top > ufoBorder.bottom || rocketBorder.bottom < ufoBorder.top) {
+            result = false;
+        } else {
+            result = true;
+        }
+        return result;
+    }
+
+    // 只创建两个火箭，放在发射初始位置上
+    function fire() {
+        // 发射 开火函数的封装需要将飞机位置确定的代码包含在内，因为飞机是会被操作进行移动的
+        // 飞机移动，火箭的发射起始位置也要移动
+
+        // 飞机的位置
+        var planeLeft = plane.offsetLeft, planeTop = plane.offsetTop;
+        // console.log('飞机位置', planeLeft, planeTop);
+
+        // 声明数组，保存一组（两个）火箭的坐标，后续火箭的所有位置的确定，都由这个数组提供
+        var rocketsCoord = [{
+            x: planeLeft + planeW / 2 - rocketW / 2 - 25,
+            y: planeTop
+        }, {
+            x: planeLeft + planeW / 2 - rocketW / 2 + 25,
+            y: planeTop
+        }];
+
+        // 通过循环创建两个火箭
+        for (var i = 0; i < 2; i++) {
+            var rocket = document.createElement('img');
+            rocket.src = 'img/rocket.png';
+            rocket.classList.add('rocket');
+            // 火箭的初始位置从预设的数组中获取
+            rocket.style.left = rocketsCoord[i].x + 'px';
+            rocket.style.top = rocketsCoord[i].y + 'px';
+
+            gameBox.appendChild(rocket);
+        }
+    }
+
+    // 只用于创建 UFO
+    function invade() {
+        var ufo = document.createElement('img');
+        ufo.src = 'img/ufo.png';
+        ufo.classList.add('ufo');
+        ufo.shoted = false;  // 默认是没有被击中
+        // 设置初始的随机位置
+        ufo.style.left = Math.floor(Math.random() * (gameBoxW - ufoW)) + 'px';
+        ufo.style.top = -(ufoH + rocketH + 1) + 'px';
+
+        gameBox.appendChild(ufo);
+    }
+
+    // 游戏进程
+    // 1. 火箭的产生和飞行
+    // 2. ufo 的产生和飞行
+    // 3. 碰撞检测
+
+    // 记录火箭发射设置的时间间隔，记录火箭上一次/第一次发射的时间
+    var rocketDiff = 800, rocketTime = new Date();
+    // 记录 UFO 产生的时间间隔，记录 UFO 上一次/第一次产生的时间
+    var ufoDiff = 1000, ufoTime = new Date();
+
+    // 记录计时器标记
+    var timer;
+
+    function play() {
+        gameBox.classList.remove('paused');
+
+        // 记录 play 方法每次执行的时间
+        var now = new Date();
+        // 根据 fire 执行时，和上一次执行的时间检测时间间隔，如果满足要求才执行，不满足就不执行
+        if (now - rocketTime > rocketDiff) {
+            fire();
+            rocketTime = now;
+        }
+        if (now - ufoTime > ufoDiff) {
+            invade();
+            ufoTime = now;
+        }
+
+        // 获取游戏区所有出现的火箭和 ufo
+        var allRockets = gameBox.querySelectorAll('.rocket');
+        var allUfos = gameBox.querySelectorAll('.ufo');
+        // 运动
+        allRockets.forEach(function (rocket) {
+            var rocketTop = rocket.offsetTop;
+            if (rocketTop < -rocketH) {
+                rocket.remove();
+            } else {
+                rocketTop -= 3;
+                rocket.style.top = rocketTop + 'px';
+            }
+        });
+        allUfos.forEach(function (ufo) {
+            var ufoTop = ufo.offsetTop;
+            if (ufoTop > gameBoxH) {
+                ufo.remove();
+
+                // 血量计算
+                health--;
+                healthBox.innerText = health;
+            } else {
+                ufoTop += 2;
+                ufo.style.top = ufoTop + 'px';
+            }
+        });
+
+        // 碰撞检测
+        allRockets.forEach(function (rocket) {
+            allUfos.forEach(function (ufo) {
+                var ret = isImpact(rocket, ufo);
+                if (ret) {
+                    rocket.remove();
+
+                    // ufo 爆炸特效
+                    ufo.src = 'img/flash.png';
+                    ufo.classList.add('boom');
+                    ufo.shoted = true;
+                    setTimeout(function () {
+                        ufo.remove();
+                    }, 500);
+
+                    // 计分
+                    score += 10;
+                    scoreBox.innerText = score;
+
+                    shotedAudio.load();
+                    shotedAudio.play();
+                }
+            });
+        });
+
+        // 如果血量为 0，游戏结束
+        // - 取消动画帧函数
+        if (health < 1) {
+            cancelAnimationFrame(timer);
+            gameover();
+        } else {
+            timer = requestAnimationFrame(play);
+        }
+    }
+    // play();
+
+    // 游戏结束方法
+    function gameover() {
+        gameBox.classList.add('paused');
+        plane.style.left = '160px';
+        plane.style.bottom = '20px';
+        var allRockets = gameBox.querySelectorAll('.rocket');
+        var allUfos = gameBox.querySelectorAll('.ufo');
+        allRockets.forEach(function (r) {
+            r.remove();
+        })
+        allUfos.forEach(function (u) {
+            u.remove();
+        });
+        endModal.classList.remove('hidden');
+        score = 0;
+        scoreBox.innerText = 0;
+        health = 10;
+        healthBox.innerText = 10;
+        bigboomAudio.load();
+        bigboomAudio.play();
+    }
+
+    // 键盘操作飞机飞行方向
+    window.onkeydown = function (e) {
+        // 获取按下按键的 ASCII 码
+        var keyCode = e.keyCode;
+        // Enter: 13    Space: 32
+        // ←:37   ↑:38  →:39   ↓: 40
+
+        // 获取飞机当前的位置
+        var planeLeft = plane.offsetLeft, planeTop = plane.offsetTop;
+
+        // 设计飞机一次性移动的距离
+        var step = 5;
+
+        switch (keyCode) {
+            // 操作飞机飞行
+            case (37): {
+                planeLeft -= step;
+                break;
+            }
+            case (38): {
+                planeTop -= step;
+                break;
+            }
+            case (39): {
+                planeLeft += step;
+                break;
+            }
+            case (40): {
+                planeTop += step;
+                break;
+            }
+            // 开始/下一关
+            case (13): {
+                break;
+            }
+            // 射击
+            case (32): {
+                // fire();
+                break;
+            }
+        }
+
+        // 飞机的边缘限制
+        // 左边缘和上边缘
+        planeLeft = planeLeft < 0 ? 0 : planeLeft;
+        planeTop = planeTop < 0 ? 0 : planeTop;
+        // 右边缘和下边缘
+        planeLeft = planeLeft > (gameBoxW - planeW) ? (gameBoxW - planeW) : planeLeft;
+        planeTop = planeTop > (gameBoxH - planeH) ? (gameBoxH - planeH) : planeTop;
+
+        // 将最新的位置重新设置在样式上，反应到页面中
+        plane.style.left = planeLeft + 'px';
+        plane.style.top = planeTop + 'px';
+    }
+
+    btns.forEach(function (btn) {
+        btn.onclick = function () {
+            play();
+            btn.parentElement.classList.add('hidden');
+        }
+    });
+
+
+</script>
+
+</html>
